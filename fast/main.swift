@@ -2,11 +2,13 @@
 // The moment a screenshot lands on disk: put the image on the clipboard,
 // then import it into Photos and delete the source file.
 // Watches the folder with FSEvents (no polling delay) instead of Folder Actions.
+// Optional: --sound <file> plays an extra cue per screenshot, e.g. to tell two Macs apart.
 import AppKit
+import AVFoundation
 import CoreServices
 import Photos
 
-let version = "0.2.0"
+let version = "0.3.3"
 let pngTail: [UInt8] = [0x49, 0x45, 0x4E, 0x44, 0xAE, 0x42, 0x60, 0x82] // end of the IEND chunk
 
 // MARK: Logging
@@ -22,6 +24,12 @@ func log(_ s: String) {
 }
 
 // MARK: Screenshot folder
+
+func option(_ name: String) -> String? {
+    let a = CommandLine.arguments
+    guard let i = a.firstIndex(of: name), i + 1 < a.count else { return nil }
+    return (a[i + 1] as NSString).expandingTildeInPath
+}
 
 func screenshotDir() -> String {
     if CommandLine.arguments.count > 1, !CommandLine.arguments[1].hasPrefix("-") {
@@ -42,6 +50,63 @@ func isScreenshot(_ path: String) -> Bool {
 func readCompletePNG(_ path: String) -> Data? {
     guard let data = FileManager.default.contents(atPath: path), data.count > pngTail.count else { return nil }
     return Array(data.suffix(pngTail.count)) == pngTail ? data : nil
+}
+
+// MARK: Sound cue
+
+// Fired as early as possible. macOS writes a screenshot in three steps
+// (measured with tools/fsevents-probe):
+//   +0 ms    create  "..Screenshot ….png-XXXXXX"   (atomic-write temp, being written)
+//   +180 ms  rename  ".Screenshot ….png"
+//   +182 ms  rename  "Screenshot ….png"            (final)
+// The temp file appears only ~10 ms after the shutter starts (coreaudiod log),
+// so firing right there lands the cue on the shutter's attack while the speaker is
+// still powering up from idle — its start gets swallowed. --sound-delay <ms>
+// (default 140) pushes it to ~150 ms after the shutter, where it is heard whole.
+// Played on its own queue so audio can never hold up the clipboard.
+var cue: AVAudioPlayer?
+var cueDelay = 0.14
+var cued = Set<String>()   // final file names already cued (main queue)
+let audioQueue = DispatchQueue(label: "audio", qos: .userInteractive)
+
+func loadCue(_ path: String) {
+    guard let p = try? AVAudioPlayer(contentsOf: URL(fileURLWithPath: path)) else {
+        log("cannot load sound: \(path)"); return
+    }
+    cue = p
+    // Warm up CoreAudio once at launch: the first play in a process costs
+    // ~2-3 s of HAL / plug-in setup, which would otherwise hit the first screenshot.
+    audioQueue.async {
+        p.volume = 0
+        p.play()
+        Thread.sleep(forTimeInterval: 0.3)
+        p.stop()
+        p.volume = 1
+        p.currentTime = 0
+        p.prepareToPlay()
+    }
+    log("sound cue: \(path), \(Int(cueDelay * 1000)) ms after detection")
+}
+
+func playCue(for name: String, early: Bool) {
+    guard cue != nil, !cued.contains(name) else { return }
+    cued.insert(name)
+    audioQueue.asyncAfter(deadline: .now() + cueDelay) {
+        guard let p = cue else { return }
+        p.stop()            // rapid screenshots: restart instead of overlapping
+        p.currentTime = 0
+        p.play()
+    }
+    log("cue (\(early ? "temp file" : "final file")): \(name)")
+}
+
+/// "..Screenshot x.png-nIhk4R" or ".Screenshot x.png" -> "Screenshot x.png"; nil if not a screenshot temp.
+func finalName(ofTemp name: String) -> String? {
+    guard name.hasPrefix(".") else { return nil }
+    var n = Substring(name)
+    while n.hasPrefix(".") { n = n.dropFirst() }
+    if let r = n.range(of: ".png", options: [.caseInsensitive, .backwards]) { n = n[..<r.upperBound] } else { return nil }
+    return n.isEmpty ? nil : String(n)
 }
 
 // MARK: Handling
@@ -89,7 +154,10 @@ func importToPhotos(_ path: String) {
         try? FileManager.default.removeItem(at: url) // reached only after a successful import
         log("imported + deleted: \(url.lastPathComponent)")
     }
-    DispatchQueue.main.async { handled.remove(path) }
+    DispatchQueue.main.async {
+        handled.remove(path)
+        cued.remove((path as NSString).lastPathComponent)
+    }
 }
 
 // MARK: FSEvents
@@ -100,6 +168,13 @@ func watch(_ dir: String) {
         for i in 0..<n {
             let f = Int(flags[i])
             let p = list[i]
+            let name = (p as NSString).lastPathComponent
+            if let final = finalName(ofTemp: name) {
+                if f & kFSEventStreamEventFlagItemCreated != 0, FileManager.default.fileExists(atPath: p) {
+                    playCue(for: final, early: true)
+                }
+                continue
+            }
             guard f & kFSEventStreamEventFlagItemIsFile != 0,
                   f & (kFSEventStreamEventFlagItemCreated | kFSEventStreamEventFlagItemRenamed | kFSEventStreamEventFlagItemModified) != 0,
                   isScreenshot(p), !handled.contains(p),
@@ -108,6 +183,7 @@ func watch(_ dir: String) {
             if let c = (try? FileManager.default.attributesOfItem(atPath: p))?[.creationDate] as? Date,
                c < startTime { continue }
             handled.insert(p)
+            playCue(for: name, early: false)   // only if the temp file was missed
             handle(p)
         }
     }
@@ -132,6 +208,9 @@ PHPhotoLibrary.requestAuthorization(for: .addOnly) { s in
     log(s == .authorized ? "Photos access: allowed"
                          : "Photos access: NOT allowed (\(s.rawValue)) — clipboard only, files kept")
 }
+
+if let ms = option("--sound-delay").flatMap(Double.init) { cueDelay = max(0, ms) / 1000 }
+if let path = option("--sound") { loadCue(path) }
 
 watch(dir)
 log("screenshot-sync \(version) watching: \(dir)")

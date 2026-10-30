@@ -1,0 +1,4 @@
+tools/sound-picker/sounds/
+tools/fsevents-probe/probe
+build/
+tools/fsevents-probe/*.log

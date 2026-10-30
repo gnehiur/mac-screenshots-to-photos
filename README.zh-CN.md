@@ -8,7 +8,7 @@
 
 - **经典模式**——**纯 macOS 原生零件**：不装第三方软件、没有常驻进程、
   没有需要维护更新的东西。截图几秒内进照片。
-- **快速模式**——一个很小的常驻助手（约 140 行 Swift，零依赖），另外把
+- **快速模式**——一个很小的常驻助手（约 200 行 Swift，零依赖），另外把
   每张截图**在截完约 0.1 秒内放进剪贴板**，切到聊天窗口直接 ⌘V 就能发。
   见下面的[《快速模式》](#快速模式截图约-01-秒进剪贴板)。
 
@@ -83,6 +83,19 @@ cd mac-screenshots-to-photos/fast
 `com.gnehiur.screenshot-sync` 常驻、关掉浮动缩略图，并停用同一文件夹上的
 经典文件夹动作，免得重复导入。macOS 会问一次是否允许它**添加到照片**——点允许。
 日志：`~/Library/Logs/screenshot-sync.log`。卸载：`fast/uninstall.sh`。
+
+**两台 Mac 并排用（通用控制）？** 截图快门声在每台 Mac 上都是同一个文件
+（`/System/Library/Components/CoreAudio.component/Contents/SharedSupport/SystemSounds/system/Screen Capture.aif`），
+放在只读的系统卷上，听不出是哪台截的。给其中一台加一声额外提示音，紧跟在快门声后面：
+
+```bash
+./install.sh "$HOME/Pictures/Screenshots Auto-Import" /System/Library/Sounds/Bottle.aiff
+```
+
+听到两声就是这台，一声就是另一台。提示音在系统建临时文件时触发（快门响后约 10 毫秒），
+再等 140 毫秒才放（第三个参数，单位毫秒），免得被快门的起音和扬声器唤醒吞掉开头。`tools/sound-picker/` 是一个本地试听小页面
+（先 `python3 build.py`，再把这个文件夹用本地服务打开 `index.html`）。只有存进文件夹
+的截图会触发提示音；`⌃⇧⌘3/4`（只进剪贴板）不写文件，不会响。
 
 **经典模式为什么慢。** 文件夹动作不是即时的：macOS 会攒一批文件夹变化，
 1～5 秒后才触发，然后还要启动脚本（Automator 工作流再多一两秒）。另外，

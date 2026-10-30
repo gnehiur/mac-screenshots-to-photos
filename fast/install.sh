@@ -6,6 +6,8 @@ set -euo pipefail
 export LANG=en_US.UTF-8 LC_ALL=en_US.UTF-8   # non-ASCII folder names over ssh
 
 WATCH_DIR="${1:-$HOME/Pictures/Screenshots Auto-Import}"
+SOUND="${2:-}"   # optional extra cue per screenshot, e.g. /System/Library/Sounds/Bottle.aiff
+SOUND_DELAY="${3:-140}"   # ms after the screenshot file appears (~10 ms after the shutter)
 SRC_DIR="$(cd "$(dirname "$0")" && pwd)"
 LABEL=com.gnehiur.screenshot-sync
 APP="$HOME/Applications/screenshot-sync.app"
@@ -14,6 +16,7 @@ LOG="$HOME/Library/Logs/screenshot-sync.log"
 
 echo "== mac-screenshots-to-photos (fast mode) =="
 echo "Watched folder will be: $WATCH_DIR"
+[ -n "$SOUND" ] && { [ -f "$SOUND" ] || { echo "Sound file not found: $SOUND"; exit 1; }; echo "Extra sound cue: $SOUND"; }
 echo
 
 # --- 1. Build ----------------------------------------------------------------
@@ -45,6 +48,8 @@ fi
 launchctl bootout "gui/$UID/$LABEL" 2>/dev/null || true
 mkdir -p "$HOME/Applications" "$HOME/Library/LaunchAgents"
 rm -rf "$APP" && cp -R "$BUILD" "$APP" && rm -rf "$(dirname "$BUILD")"
+SOUND_ARGS=""
+[ -n "$SOUND" ] && SOUND_ARGS="<string>--sound</string><string>$SOUND</string><string>--sound-delay</string><string>$SOUND_DELAY</string>"
 cat > "$PLIST" <<P
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -52,7 +57,7 @@ cat > "$PLIST" <<P
 <dict>
 	<key>Label</key><string>$LABEL</string>
 	<key>ProgramArguments</key>
-	<array><string>$APP/Contents/MacOS/screenshot-sync</string><string>$WATCH_DIR</string></array>
+	<array><string>$APP/Contents/MacOS/screenshot-sync</string><string>$WATCH_DIR</string>$SOUND_ARGS</array>
 	<key>RunAtLoad</key><true/>
 	<key>KeepAlive</key><true/>
 	<key>ProcessType</key><string>Interactive</string>

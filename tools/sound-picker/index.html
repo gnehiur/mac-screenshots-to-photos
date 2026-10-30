@@ -1,0 +1,121 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>选截图提示音</title>
+<style>
+  :root { --bg:#f5f5f7; --card:#fff; --ink:#1d1d1f; --mute:#6e6e73; --line:#e5e5ea;
+          --mini:#0a7d55; --mbp:#7a3fd0; --play:#0071e3; }
+  * { box-sizing:border-box; }
+  body { margin:0; font:15px/1.5 -apple-system, "PingFang SC", sans-serif; background:var(--bg); color:var(--ink); }
+  header { position:sticky; top:0; z-index:2; background:rgba(245,245,247,.92); backdrop-filter:blur(12px);
+           border-bottom:1px solid var(--line); padding:14px 24px; }
+  h1 { font-size:20px; margin:0 0 10px; }
+  .picks { display:flex; gap:12px; flex-wrap:wrap; align-items:center; }
+  .slot { display:flex; align-items:center; gap:8px; padding:8px 12px; border-radius:10px; background:var(--card);
+          border:2px solid var(--line); min-width:250px; }
+  .slot b { font-size:13px; color:#fff; padding:2px 8px; border-radius:6px; }
+  .slot.mini b { background:var(--mini); } .slot.mbp b { background:var(--mbp); }
+  .slot .v { font-weight:600; flex:1; } .slot .v.empty { color:var(--mute); font-weight:400; }
+  .slot button { border:0; background:none; color:var(--play); cursor:pointer; font-size:13px; }
+  label.sim { margin-left:auto; color:var(--mute); font-size:14px; cursor:pointer; user-select:none; }
+  .done { width:100%; margin-top:8px; padding:8px 12px; border-radius:8px; background:#e8f7ef; color:#0a5c3e; display:none; }
+  main { display:grid; grid-template-columns:1fr 1fr; gap:20px; padding:20px 24px 40px; }
+  section h2 { font-size:16px; margin:0 0 4px; } section p.hint { margin:0 0 12px; color:var(--mute); font-size:13px; }
+  .card { display:flex; align-items:center; gap:10px; background:var(--card); border:2px solid transparent;
+          border-radius:12px; padding:10px 12px; margin-bottom:8px; cursor:pointer; }
+  .card:hover { border-color:var(--line); }
+  .card.playing { border-color:var(--play); }
+  .card.is-mini { border-color:var(--mini); } .card.is-mbp { border-color:var(--mbp); }
+  .card .ico { width:30px; height:30px; border-radius:50%; background:var(--play); color:#fff; display:grid; place-items:center; flex:none; font-size:12px; }
+  .card .meta { flex:1; min-width:0; }
+  .card .nm { font-weight:600; } .card .sub { color:var(--mute); font-size:12px; }
+  .bar { height:4px; border-radius:2px; background:var(--line); margin-top:4px; }
+  .bar i { display:block; height:100%; border-radius:2px; background:#8e8e93; }
+  .card .pick { border:1.5px solid; background:#fff; border-radius:8px; padding:4px 8px; font-size:12px; cursor:pointer; white-space:nowrap; }
+  .pick.mini { color:var(--mini); } .pick.mbp { color:var(--mbp); }
+  .pick.on.mini { background:var(--mini); color:#fff; } .pick.on.mbp { background:var(--mbp); color:#fff; }
+  details { grid-column:1 / -1; color:var(--mute); font-size:13px; }
+  details summary { cursor:pointer; } details table { border-collapse:collapse; margin-top:8px; }
+  details td { padding:3px 14px 3px 0; }
+</style>
+</head>
+<body>
+<header>
+  <h1>选截图提示音 —— 点一张卡片就听一遍</h1>
+  <div class="picks">
+    <div class="slot mini"><b>Mac mini</b><span class="v empty" id="v-mini">还没选</span><button data-clear="mini">清除</button></div>
+    <div class="slot mbp"><b>MacBook</b><span class="v empty" id="v-mbp">还没选</span><button data-clear="mbp">清除</button></div>
+    <label class="sim"><input type="checkbox" id="sim" checked> 模拟真实效果：先放系统快门声，再放这个</label>
+    <div class="done" id="done"></div>
+  </div>
+</header>
+<main>
+  <section><h2>低音组</h2><p class="hint">建议给 Mac mini 选这一组（越往下越高）</p><div id="low"></div></section>
+  <section><h2>高音组</h2><p class="hint">建议给 MacBook 选这一组（越往下越高）</p><div id="high"></div></section>
+  <details><summary id="drop-sum"></summary><table id="drop"></table></details>
+</main>
+<script src="sounds.js"></script>
+<script>
+const S = window.SOUNDS, names = { mini: "Mac mini", mbp: "MacBook" };
+const pick = JSON.parse(localStorage.getItem("screenshot-sound-pick") || "{}");
+const shutter = new Audio(S.shutter);
+let cur = null, timer = null;
+const maxHz = Math.max(...S.keep.map(s => s.hz));
+
+function play(s, card) {
+  [shutter, cur].forEach(a => a && (a.pause(), a.currentTime = 0));
+  clearTimeout(timer);
+  document.querySelectorAll(".card.playing").forEach(c => c.classList.remove("playing"));
+  card.classList.add("playing");
+  cur = new Audio(s.src);
+  cur.onended = () => card.classList.remove("playing");
+  if (document.getElementById("sim").checked) {
+    shutter.play();
+    timer = setTimeout(() => cur.play(), 150);   // 和 screenshot-sync 的实际间隔差不多
+  } else cur.play();
+}
+
+function render() {
+  for (const band of ["low", "high"]) {
+    const box = document.getElementById(band); box.innerHTML = "";
+    for (const s of S.keep.filter(x => x.band === band)) {
+      const c = document.createElement("div");
+      c.className = "card" + (pick.mini === s.name ? " is-mini" : "") + (pick.mbp === s.name ? " is-mbp" : "");
+      c.innerHTML = `<div class="ico">▶</div>
+        <div class="meta"><div class="nm">${s.name}</div>
+          <div class="sub">${s.sec} 秒 · 音高约 ${s.hz} Hz · ${s.group}</div>
+          <div class="bar"><i style="width:${Math.round(s.hz / maxHz * 100)}%"></i></div></div>
+        <button class="pick mini${pick.mini === s.name ? " on" : ""}" data-who="mini">给 Mac mini</button>
+        <button class="pick mbp${pick.mbp === s.name ? " on" : ""}" data-who="mbp">给 MacBook</button>`;
+      c.onclick = e => {
+        const who = e.target.dataset.who;
+        if (who) { pick[who] = pick[who] === s.name ? undefined : s.name; save(); }
+        else play(s, c);
+      };
+      box.appendChild(c);
+    }
+  }
+  for (const who of ["mini", "mbp"]) {
+    const v = document.getElementById("v-" + who);
+    v.textContent = pick[who] || "还没选"; v.classList.toggle("empty", !pick[who]);
+  }
+  const done = document.getElementById("done");
+  if (pick.mini && pick.mbp) {
+    done.style.display = "block";
+    done.textContent = pick.mini === pick.mbp
+      ? "两台选了同一个声音，分不出来哦，换一个吧。"
+      : `选好了：Mac mini → ${pick.mini}，MacBook → ${pick.mbp}。回对话里跟 Claude 说一声「选好了」就行。`;
+  } else done.style.display = "none";
+}
+function save() { localStorage.setItem("screenshot-sound-pick", JSON.stringify(pick)); render(); }
+document.querySelectorAll("[data-clear]").forEach(b => b.onclick = () => { delete pick[b.dataset.clear]; save(); });
+
+document.getElementById("drop-sum").textContent =
+  `已筛掉 ${S.dropped.length} 个（系统 / iPhone 常用的，或超过 2 秒的）——点开看原因`;
+document.getElementById("drop").innerHTML = S.dropped
+  .map(d => `<tr><td>${d.name}</td><td>${d.sec} 秒</td><td>${d.why}</td></tr>`).join("");
+render();
+</script>
+</body>
+</html>

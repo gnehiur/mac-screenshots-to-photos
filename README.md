@@ -9,7 +9,7 @@ walks away. This tiny project closes that gap, in one of two modes:
 - **Classic** — **only built-in macOS parts**: no third-party apps, no
   background daemons, nothing to keep updated. Screenshots reach Photos
   within seconds.
-- **Fast** — one tiny resident helper (~140 lines of Swift, zero
+- **Fast** — one tiny resident helper (~200 lines of Swift, zero
   dependencies) that also puts every screenshot **on the clipboard about
   0.1 s after you take it**, so you can Cmd+V it straight into a chat.
   See [Fast mode](#fast-mode-screenshot--clipboard-in-01-s).
@@ -93,6 +93,22 @@ runs it as LaunchAgent `com.gnehiur.screenshot-sync`, turns off the floating
 thumbnail, and disables a classic Folder Action on the same folder so nothing
 is imported twice. macOS asks once to let it **add to Photos** — click Allow.
 Log: `~/Library/Logs/screenshot-sync.log`. Undo: `fast/uninstall.sh`.
+
+**Two Macs side by side (Universal Control)?** The shutter sound is the same
+file on every Mac (`/System/Library/Components/CoreAudio.component/Contents/SharedSupport/SystemSounds/system/Screen Capture.aif`),
+on the read-only system volume, so you can't tell which Mac just took the
+shot. Give one of them an extra cue, played right after the shutter:
+
+```bash
+./install.sh "$HOME/Pictures/Screenshots Auto-Import" /System/Library/Sounds/Bottle.aiff
+```
+
+Two sounds = that Mac, one sound = the other. The cue fires on the temp file
+macOS creates ~10 ms after the shutter, then waits 140 ms (third argument, in
+ms) so it isn't swallowed by the shutter's attack and the speaker waking up. `tools/sound-picker/` is a small
+local page for auditioning candidates (`python3 build.py`, then serve the
+folder and open `index.html`). Only screenshots saved to the folder trigger the
+cue; Ctrl+Shift+Cmd+3/4 (clipboard-only) writes no file and stays silent.
 
 **Why classic mode is slow.** Folder Actions are not instant: macOS batches
 folder changes and fires the action 1–5 s later, then has to spin up the
